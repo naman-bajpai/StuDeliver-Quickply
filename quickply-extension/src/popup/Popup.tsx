@@ -93,17 +93,25 @@ export default function Popup() {
         return;
       }
 
-      // Extract fields from the page
-      const fieldsResponse = await sendMessageToTab(tab.id, { action: 'extractFields' });
-      const fields = (fieldsResponse as any)?.fields || [];
+      // Extract page context (fields + page info)
+      const contextResponse = await sendMessageToTab(tab.id, { action: 'extractPageContext' });
+      const pageContext = (contextResponse as any)?.pageContext;
 
-      if (fields.length === 0) {
+      if (!pageContext || !pageContext.fields || pageContext.fields.length === 0) {
         alert('No form fields found on this page.');
         return;
       }
 
-      // Use AI to auto-fill
-      const aiFilledData = await autoFillWithAI(userData, fields);
+      // Get resume data if available
+      const resumeData = await resumeStorage.getResume();
+
+      // Use AI to auto-fill (with resume and page context)
+      const aiFilledData = await autoFillWithAI(
+        userData, 
+        pageContext.fields,
+        pageContext,
+        resumeData
+      );
       
       // Merge AI-filled data with existing user data
       const mergedData = { ...userData, ...aiFilledData };

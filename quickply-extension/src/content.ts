@@ -1,4 +1,4 @@
-import { extractFields } from './lib/fieldExtract';
+import { extractFields, extractPageContext } from './lib/fieldExtract';
 import { fillFields } from './lib/fill';
 
 // Listen for messages from background or popup
@@ -13,6 +13,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'extractFields':
       const fields = extractFields();
       sendResponse({ success: true, fields });
+      break;
+    
+    case 'extractPageContext':
+      const pageContext = extractPageContext();
+      sendResponse({ success: true, pageContext });
       break;
     
     case 'fillFields':

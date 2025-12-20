@@ -9,6 +9,17 @@ const ExtractResumeSchema = z.object({
 const AutoFillSchema = z.object({
     userData: z.record(z.string(), z.any()),
     pageFields: z.array(z.any()),
+    pageContext: z.object({
+        title: z.string().optional(),
+        url: z.string().optional(),
+        formTitle: z.string().optional(),
+        formDescription: z.string().optional(),
+    }).optional(),
+    resumeData: z.object({
+        fileName: z.string(),
+        fileData: z.string(),
+        fileType: z.string(),
+    }).nullable().optional(),
 });
 // Simple text extraction from base64 (for PDF/DOC, you'd need proper parsing libraries)
 async function extractTextFromResume(fileData, fileType) {
@@ -80,14 +91,62 @@ async function extractDataWithAI(resumeText) {
     }
     return {};
 }
-// Smart field matching using AI
-async function smartFillWithAI(userData, pageFields) {
+// Smart field matching using AI with resume and page context
+async function smartFillWithAI(userData, pageFields, pageContext, resumeData) {
     if (env.AI_PROVIDER === 'mock') {
         // Mock - just return userData
         return userData;
     }
     if (env.AI_PROVIDER === 'openai' && env.AI_API_KEY) {
         try {
+            // Extract resume text if available
+            let resumeText = '';
+            if (resumeData) {
+                resumeText = await extractTextFromResume(resumeData.fileData, resumeData.fileType);
+            }
+            // Build comprehensive prompt
+            const systemPrompt = `You are an intelligent form-filling assistant. Your task is to:
+1. Extract ALL relevant information from the user's resume (if provided)
+2. Analyze the webpage context to understand what information is needed
+3. Combine resume data with existing user data to create a complete profile
+4. Return enhanced user data with all extracted and inferred information
+
+Return a JSON object with these fields (only include fields you can extract or infer):
+- firstName, lastName, email, phone, location, github, linkedin
+- address, city, state, zipCode, country
+
+Use the resume as the primary source, supplement with existing userData, and infer missing fields when possible based on context.`;
+            const userPrompt = `Page Context:
+- Title: ${pageContext?.title || 'Unknown'}
+- URL: ${pageContext?.url || 'Unknown'}
+- Form Title: ${pageContext?.formTitle || 'N/A'}
+- Form Description: ${pageContext?.formDescription || 'N/A'}
+
+Form Fields on Page:
+${JSON.stringify(pageFields.map(f => ({
+                selector: f.selector,
+                name: f.name,
+                id: f.id,
+                label: f.label,
+                placeholder: f.placeholder,
+                type: f.type,
+                context: f.context,
+                required: f.required,
+            })), null, 2)}
+
+${resumeText ? `\n=== RESUME CONTENT (Extract all information from this) ===\n${resumeText.substring(0, 8000)}\n=== END RESUME ===` : '\nNo resume provided.'}
+
+Existing User Data:
+${JSON.stringify(userData, null, 2)}
+
+Instructions:
+1. Extract ALL relevant information from the resume (name, email, phone, location, GitHub, LinkedIn, address, etc.)
+2. Use the form fields and page context to understand what information is being requested
+3. Combine resume data with existing userData (resume takes priority for conflicts)
+4. Infer missing information when possible (e.g., if resume has city/state, create location field)
+5. Return a complete userData object with all extracted and enhanced information
+
+Return ONLY a JSON object with userData fields (firstName, lastName, email, phone, location, github, linkedin, address, city, state, zipCode, country).`;
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -99,33 +158,44 @@ async function smartFillWithAI(userData, pageFields) {
                     messages: [
                         {
                             role: 'system',
-                            content: `You are a form-filling assistant. Given user data and form fields from a webpage, intelligently match and fill the fields. Return a JSON object with field names as keys and values from userData that best match each field.`,
+                            content: systemPrompt,
                         },
                         {
                             role: 'user',
-                            content: JSON.stringify({
-                                userData,
-                                pageFields: pageFields.map(f => ({
-                                    name: f.name,
-                                    id: f.id,
-                                    label: f.label,
-                                    placeholder: f.placeholder,
-                                    type: f.type,
-                                })),
-                            }),
+                            content: userPrompt,
                         },
                     ],
                     response_format: { type: 'json_object' },
                     temperature: 0.2,
+                    max_tokens: 2000,
                 }),
             });
             if (!response.ok) {
+                const errorText = await response.text();
+                console.error('OpenAI API error:', errorText);
                 throw new Error('OpenAI API error');
             }
             const data = await response.json();
-            const filledData = JSON.parse(data.choices[0].message.content);
-            // Merge with userData
-            return { ...userData, ...filledData };
+            const aiResponse = JSON.parse(data.choices[0].message.content);
+            // The AI returns enhanced userData with all extracted information
+            // Merge with existing userData (AI data takes priority)
+            const result = { ...userData };
+            // Extract all userData fields from AI response
+            const userDataFields = ['firstName', 'lastName', 'email', 'phone', 'location',
+                'github', 'linkedin', 'address', 'city', 'state', 'zipCode', 'country'];
+            for (const field of userDataFields) {
+                if (aiResponse[field] && typeof aiResponse[field] === 'string' && aiResponse[field].trim()) {
+                    result[field] = aiResponse[field].trim();
+                }
+            }
+            // If location wasn't directly extracted but we have city/state, create it
+            if (!result.location && (result.city || result.state)) {
+                const locationParts = [result.city, result.state].filter(Boolean);
+                if (locationParts.length > 0) {
+                    result.location = locationParts.join(', ');
+                }
+            }
+            return result;
         }
         catch (error) {
             console.error('OpenAI API error:', error);
@@ -157,8 +227,8 @@ export async function aiRoutes(app) {
     // Auto-fill form fields using AI
     app.post("/ai/auto-fill", { preHandler: requireUser }, async (req) => {
         const body = AutoFillSchema.parse(req.body);
-        // Use AI to intelligently fill fields
-        const filledData = await smartFillWithAI(body.userData, body.pageFields);
+        // Use AI to intelligently fill fields with resume and page context
+        const filledData = await smartFillWithAI(body.userData, body.pageFields, body.pageContext, body.resumeData || undefined);
         return {
             success: true,
             filledData,

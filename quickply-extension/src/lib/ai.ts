@@ -55,7 +55,12 @@ export async function extractDataFromResume(resume: ResumeData): Promise<AIExtra
   }
 }
 
-export async function autoFillWithAI(userData: UserData, pageFields: any[]): Promise<UserData> {
+export async function autoFillWithAI(
+  userData: UserData, 
+  pageFields: any[], 
+  pageContext?: any,
+  resumeData?: ResumeData | null
+): Promise<UserData> {
   try {
     // Get the current user's session token
     const { data: { session } } = await supabase.auth.getSession();
@@ -74,6 +79,12 @@ export async function autoFillWithAI(userData: UserData, pageFields: any[]): Pro
       body: JSON.stringify({
         userData,
         pageFields,
+        pageContext,
+        resumeData: resumeData ? {
+          fileName: resumeData.fileName,
+          fileData: resumeData.fileData,
+          fileType: resumeData.fileType,
+        } : null,
       }),
     });
 
