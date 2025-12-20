@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { signIn, signUp, getCurrentUser, signOut } from '../lib/auth';
 import { storage, UserData } from '../lib/storage';
+import { resumeStorage, ResumeData } from '../lib/resume';
+import ResumeUpload from '../components/ResumeUpload';
 import './options.css';
 
 export default function Options() {
@@ -11,6 +13,7 @@ export default function Options() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [resume, setResume] = useState<ResumeData | null>(null);
 
   useEffect(() => {
     loadUserData();
@@ -24,6 +27,9 @@ export default function Options() {
       if (currentUser) {
         const data = await storage.getUserData();
         setUserData(data);
+        
+        const resumeData = await resumeStorage.getResume();
+        setResume(resumeData);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -141,6 +147,21 @@ export default function Options() {
       </div>
 
       <div className="data-section">
+        <h2>Resume</h2>
+        <p className="section-description">
+          Upload your resume to automatically extract information and enable AI-powered form filling.
+        </p>
+        <ResumeUpload
+          existingResume={resume}
+          onResumeUploaded={(resume) => setResume(resume)}
+          onDataExtracted={(extractedData) => {
+            const mergedData = { ...userData, ...extractedData };
+            setUserData(mergedData);
+          }}
+        />
+      </div>
+
+      <div className="data-section">
         <h2>Your Information</h2>
         <p className="section-description">
           Fill in your information below. This data will be used to automatically fill job application forms.
@@ -234,6 +255,36 @@ export default function Options() {
               value={userData.country || ''}
               onChange={(e) => setUserData({ ...userData, country: e.target.value })}
               placeholder="United States"
+            />
+          </div>
+
+          <div className="form-group full-width">
+            <label>Location</label>
+            <input
+              type="text"
+              value={userData.location || ''}
+              onChange={(e) => setUserData({ ...userData, location: e.target.value })}
+              placeholder="City, State or City, Country (e.g., San Francisco, CA or London, UK)"
+            />
+          </div>
+
+          <div className="form-group full-width">
+            <label>GitHub Profile URL</label>
+            <input
+              type="url"
+              value={userData.github || ''}
+              onChange={(e) => setUserData({ ...userData, github: e.target.value })}
+              placeholder="https://github.com/username"
+            />
+          </div>
+
+          <div className="form-group full-width">
+            <label>LinkedIn Profile URL</label>
+            <input
+              type="url"
+              value={userData.linkedin || ''}
+              onChange={(e) => setUserData({ ...userData, linkedin: e.target.value })}
+              placeholder="https://linkedin.com/in/username"
             />
           </div>
         </div>

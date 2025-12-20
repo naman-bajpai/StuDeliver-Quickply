@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { getCurrentUser, signOut } from '../lib/auth';
 import { storage, UserData } from '../lib/storage';
+import { resumeStorage, ResumeData } from '../lib/resume';
+import { autoFillWithAI } from '../lib/ai';
+import ResumeUpload from '../components/ResumeUpload';
 import './popup.css';
 
 export default function Popup() {
@@ -8,6 +11,8 @@ export default function Popup() {
   const [userData, setUserData] = useState<UserData>({});
   const [loading, setLoading] = useState(true);
   const [filling, setFilling] = useState(false);
+  const [aiFilling, setAiFilling] = useState(false);
+  const [resume, setResume] = useState<ResumeData | null>(null);
 
   useEffect(() => {
     loadUserData();
@@ -20,6 +25,9 @@ export default function Popup() {
       
       const data = await storage.getUserData();
       setUserData(data);
+      
+      const resumeData = await resumeStorage.getResume();
+      setResume(resumeData);
     } catch (error) {
       console.error('Error loading user data:', error);
     } finally {
@@ -76,6 +84,58 @@ export default function Popup() {
     }
   }
 
+  async function handleAIFill() {
+    setAiFilling(true);
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab.id) {
+        alert('Could not get active tab. Please try again.');
+        return;
+      }
+
+      // Extract fields from the page
+      const fieldsResponse = await sendMessageToTab(tab.id, { action: 'extractFields' });
+      const fields = (fieldsResponse as any)?.fields || [];
+
+      if (fields.length === 0) {
+        alert('No form fields found on this page.');
+        return;
+      }
+
+      // Use AI to auto-fill
+      const aiFilledData = await autoFillWithAI(userData, fields);
+      
+      // Merge AI-filled data with existing user data
+      const mergedData = { ...userData, ...aiFilledData };
+      setUserData(mergedData);
+      await storage.setUserData(mergedData);
+
+      // Fill the fields
+      const fillResponse = await sendMessageToTab(tab.id, {
+        action: 'fillFields',
+        data: mergedData,
+      });
+
+      if (fillResponse && (fillResponse as any).success) {
+        alert('Fields filled successfully using AI!');
+      } else {
+        alert('Failed to fill fields. Please check the console for details.');
+      }
+    } catch (error: any) {
+      console.error('Error AI filling fields:', error);
+      alert(`Error: ${error.message || 'Failed to auto-fill with AI. Please try again.'}`);
+    } finally {
+      setAiFilling(false);
+    }
+  }
+
+  function handleDataExtracted(extractedData: Partial<UserData>) {
+    // Merge extracted data with existing user data
+    const mergedData = { ...userData, ...extractedData };
+    setUserData(mergedData);
+    storage.setUserData(mergedData);
+  }
+
   async function handleSignOut() {
     try {
       await signOut();
@@ -126,6 +186,15 @@ export default function Popup() {
         </div>
 
         <div className="form-section">
+          <h3>Resume</h3>
+          <ResumeUpload
+            existingResume={resume}
+            onResumeUploaded={(resume) => setResume(resume)}
+            onDataExtracted={handleDataExtracted}
+          />
+        </div>
+
+        <div className="form-section">
           <h3>Your Information</h3>
           <div className="form-group">
             <label>First Name</label>
@@ -159,6 +228,33 @@ export default function Popup() {
               onChange={(e) => setUserData({ ...userData, phone: e.target.value })}
             />
           </div>
+          <div className="form-group">
+            <label>Location</label>
+            <input
+              type="text"
+              value={userData.location || ''}
+              onChange={(e) => setUserData({ ...userData, location: e.target.value })}
+              placeholder="City, State or City, Country"
+            />
+          </div>
+          <div className="form-group">
+            <label>GitHub</label>
+            <input
+              type="url"
+              value={userData.github || ''}
+              onChange={(e) => setUserData({ ...userData, github: e.target.value })}
+              placeholder="https://github.com/username"
+            />
+          </div>
+          <div className="form-group">
+            <label>LinkedIn</label>
+            <input
+              type="url"
+              value={userData.linkedin || ''}
+              onChange={(e) => setUserData({ ...userData, linkedin: e.target.value })}
+              placeholder="https://linkedin.com/in/username"
+            />
+          </div>
         </div>
 
         <div className="action-buttons">
@@ -167,6 +263,9 @@ export default function Popup() {
           </button>
           <button onClick={handleFill} className="fill-btn" disabled={filling}>
             {filling ? 'Filling...' : 'Fill Current Page'}
+          </button>
+          <button onClick={handleAIFill} className="ai-fill-btn" disabled={aiFilling || !resume}>
+            {aiFilling ? 'AI Filling...' : '🤖 AI Fill'}
           </button>
         </div>
       </div>

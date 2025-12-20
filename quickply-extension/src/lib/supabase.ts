@@ -22,6 +22,9 @@ export interface Profile {
   state?: string;
   zip_code?: string;
   country?: string;
+  location?: string;
+  github?: string;
+  linkedin?: string;
   resume_url?: string;
   cover_letter_url?: string;
   created_at?: string;

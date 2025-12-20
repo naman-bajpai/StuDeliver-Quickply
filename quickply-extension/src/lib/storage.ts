@@ -8,6 +8,9 @@ export interface UserData {
   state?: string;
   zipCode?: string;
   country?: string;
+  location?: string;
+  github?: string;
+  linkedin?: string;
   resume?: string;
   coverLetter?: string;
   [key: string]: any;
